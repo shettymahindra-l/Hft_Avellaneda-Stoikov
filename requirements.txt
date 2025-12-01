@@ -1,0 +1,13 @@
+python-binance
+python-decouple
+psycopg2-binary
+pandas
+pandas-ta
+numpy
+fastapi
+uvicorn
+websockets
+pandas
+numpy
+matplotlib
+psycopg2-binary   # only if using PostgreSQL as data source

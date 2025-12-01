@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crypto Trading Bot Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+    }
+
+    .card {
+      background-color: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 0.75rem;
+    }
+
+    .trade-buy {
+      color: #4ade80;
+    }
+
+    .trade-sell {
+      color: #f87171;
+    }
+
+    .pnl-positive {
+      color: #4ade80;
+    }
+
+    .pnl-negative {
+      color: #f87171;
+    }
+
+    .status-dot {
+      height: 10px;
+      width: 10px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-left: 8px;
+      transition: .3s ease;
+    }
+
+    .dot-connected {
+      background-color: #22c55e;
+    }
+
+    .dot-disconnected {
+      background-color: #ef4444;
+    }
+  </style>
+</head>
+
+<body class="bg-gray-900 text-gray-200">
+  <div class="container mx-auto p-4 md:p-8">
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold text-white">Trading Bot Dashboard</h1>
+      <p class="text-gray-400">Monitoring all automated trading activity.</p>
+    </header>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+
+      <!-- Total PnL -->
+      <div class="card p-6 col-span-1 md:col-span-2 lg:col-span-1">
+        <h2 class="text-lg font-semibold text-gray-400 mb-2">Total PnL</h2>
+        <p id="pnl-value" class="text-4xl font-bold text-gray-500">$0.00</p>
+      </div>
+
+      <!-- Backtesting Section (GRAPH REMOVED, BUTTON ONLY) -->
+      <div class="card p-6 col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-semibold text-white">Backtesting Module</h2>
+            <p class="text-gray-400">Open detailed backtest page</p>
+          </div>
+
+          <!-- Button to redirect -->
+          <button onclick="window.location.href='backtest.html'"
+            class="px-4 py-2 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white font-semibold">
+            Go to Backtest Page
+          </button>
+        </div>
+      </div>
+
+      <!-- Current Price -->
+      <div class="card p-6 col-span-1">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-gray-400 mb-2">Current Price (ETH)</h2>
+          <span id="connection-status" class="status-dot dot-disconnected" title="Disconnected"></span>
+        </div>
+        <p id="current-price" class="text-4xl font-bold text-white">$0.00</p>
+      </div>
+
+      <!-- ETH Price Chart -->
+      <div class="card p-6 col-span-1 md:col-span-2 lg:col-span-3 xl:col-span-4">
+        <h2 class="text-xl font-semibold text-white mb-4">ETH/USDT Price Action</h2>
+        <div class="h-96"><canvas id="priceChart"></canvas></div>
+      </div>
+
+      <!-- Recent Trades -->
+      <div class="card p-6 col-span-1 md:col-span-2">
+        <h2 class="text-xl font-semibold text-white mb-4">Recent Trades</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-gray-700 text-gray-400">
+                <th class="p-3">Time</th>
+                <th class="p-3">Bot</th>
+                <th class="p-3">Symbol</th>
+                <th class="p-3">Side</th>
+                <th class="p-3 text-right">Amount</th>
+                <th class="p-3 text-right">Price</th>
+              </tr>
+            </thead>
+            <tbody id="trades-table"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const API_BASE_URL = 'http://127.0.0.1:8000';
+    const WS_URL = 'ws://127.0.0.1:8000/ws/price';
+
+    const pnlValueEl = document.getElementById('pnl-value');
+    const currentPriceEl = document.getElementById('current-price');
+    const tradesTableBody = document.getElementById('trades-table');
+    const connectionStatusDot = document.getElementById('connection-status');
+
+    // ETH Price Chart
+    const priceChartCtx = document.getElementById('priceChart').getContext('2d');
+    const priceChart = new Chart(priceChartCtx, {
+      type: 'line',
+      data: { labels: [], datasets: [{ label: 'ETH Price', data: [], borderColor: 'rgb(59,130,246)', borderWidth: 2, tension: 0.1, pointRadius: 0 }] },
+      options: { responsive: true, maintainAspectRatio: false, scales: { x: { type: 'time', time: { unit: 'second' }, ticks: { color: '#9ca3af' } }, y: { ticks: { color: '#9ca3af' } } }, plugins: { legend: { display: false } } }
+    });
+
+    // Websocket live price
+    function connectWebSocket() {
+      const socket = new WebSocket(WS_URL);
+      socket.onopen = () => connectionStatusDot.classList.replace('dot-disconnected', 'dot-connected');
+      socket.onmessage = (evt) => {
+        const d = JSON.parse(evt.data);
+        const price = parseFloat(d.price);
+        const time = new Date(parseInt(d.time));
+        currentPriceEl.textContent = `$${price.toFixed(2)}`;
+        priceChart.data.labels.push(time);
+        priceChart.data.datasets[0].data.push(price);
+        if (priceChart.data.labels.length > 100) {
+          priceChart.data.labels.shift();
+          priceChart.data.datasets[0].data.shift();
+        }
+        priceChart.update('quiet');
+      };
+      socket.onclose = () => {
+        connectionStatusDot.classList.replace('dot-connected', 'dot-disconnected');
+        setTimeout(connectWebSocket, 3000);
+      };
+    }
+
+    async function fetchData(endpoint) {
+      try { return await (await fetch(`${API_BASE_URL}${endpoint}`)).json(); }
+      catch { return null; }
+    }
+
+    function updatePnl() {
+      fetchData('/api/pnl').then(d => {
+        if (!d) return;
+        const pnl = d.total_pnl;
+        const pos = pnl >= 0;
+        pnlValueEl.textContent = `${pos ? '+' : ''}$${pnl.toFixed(2)}`;
+        pnlValueEl.className = `text-4xl font-bold ${pos ? 'pnl-positive' : 'pnl-negative'}`;
+      });
+    }
+
+    function updateTrades() {
+      fetchData('/api/trades').then(data => {
+        if (!data) return;
+        tradesTableBody.innerHTML = '';
+        if (data.length === 0) {
+          tradesTableBody.innerHTML = '<tr><td colspan="6" class="text-center p-4 text-gray-500">No trades yet.</td></tr>';
+          return;
+        }
+        data.forEach(t => {
+          tradesTableBody.innerHTML += `
+            <tr class="border-b border-gray-800">
+              <td class="p-3 text-gray-400">${new Date(t.time).toLocaleTimeString()}</td>
+              <td class="p-3 font-semibold">${t.bot_name}</td>
+              <td class="p-3">${t.sym}</td>
+              <td class="p-3 font-semibold ${t.side === 'buy' ? 'trade-buy' : 'trade-sell'}">${t.side.toUpperCase()}</td>
+              <td class="p-3 text-right">${parseFloat(t.amount).toFixed(4)}</td>
+              <td class="p-3 text-right font-semibold">$${parseFloat(t.price).toFixed(2)}</td>
+            </tr>`;
+        });
+      });
+    }
+
+    window.onload = () => {
+      connectWebSocket();
+      updatePnl();
+      updateTrades();
+      setInterval(() => { updatePnl(); updateTrades(); }, 3000);
+    };
+  </script>
+
+</body>
+
+</html>

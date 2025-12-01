@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Backtest Results</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-900 text-white p-6">
+
+  <h1 class="text-3xl font-bold mb-6">Backtest Results</h1>
+
+  <!-- Total PnL (Local CSV) -->
+  <div class="bg-gray-800 p-4 rounded-lg shadow mb-6">
+    <h2 class="text-xl font-semibold">Total PnL (Local CSV)</h2>
+    <p id="totalPnl" class="text-3xl font-bold text-green-400 mt-2">Loading...</p>
+  </div>
+
+  <!-- Equity Chart (Local CSV) -->
+  <div class="bg-gray-800 p-4 rounded-lg shadow mb-8">
+    <h2 class="text-xl font-semibold mb-2">Equity Curve</h2>
+    <canvas id="equityChart" height="120"></canvas>
+  </div>
+
+  <!-- Upload CSV Section -->
+  <div class="bg-gray-800 p-4 rounded-lg shadow">
+    <h2 class="text-xl font-semibold mb-4">Upload CSV for Backtest</h2>
+    <div class="flex items-center gap-4 mb-4">
+      <input type="file" id="csvFile" class="text-black">
+      <button onclick="uploadCSV()" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded">
+        Run Backtest
+      </button>
+    </div>
+    <p class="mb-4">Total PnL (Uploaded): <span id="upload_pnl" class="text-green-400 font-bold">0</span></p>
+    <canvas id="uploadEquityChart" height="200"></canvas>
+  </div>
+
+  <script>
+    const API_BASE = "http://127.0.0.1:8000";
+
+    // === Load local backtest results ===
+    async function loadBacktest() {
+      try {
+        const res = await fetch(`${API_BASE}/api/backtest-local`);
+        const data = await res.json();
+
+        if (data.error) {
+          document.getElementById("totalPnl").innerText = "Error: " + data.error;
+          console.error("backtest-local error:", data.error);
+          return;
+        }
+
+        document.getElementById("totalPnl").innerText = data.total_pnl;
+
+        const ctx = document.getElementById("equityChart").getContext("2d");
+        new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: data.equity.map((_, i) => i + 1),
+            datasets: [{
+              label: "Equity",
+              data: data.equity,
+              borderWidth: 2,
+              borderColor: "#4ADE80",
+              backgroundColor: "rgba(74, 222, 128, 0.1)",
+              fill: true,
+              tension: 0.25
+            }]
+          },
+          options: {
+            plugins: { legend: { labels: { color: "white" } } },
+            scales: {
+              x: { ticks: { color: "white" } },
+              y: { ticks: { color: "white" } }
+            }
+          }
+        });
+      } catch (err) {
+        console.error("backtest-local fetch failed:", err);
+        document.getElementById("totalPnl").innerText = "Failed to load backtest.";
+      }
+    }
+
+    loadBacktest();
+
+    // === Upload CSV & backtest ===
+    let uploadChart;
+
+    function uploadCSV() {
+      const fileInput = document.getElementById("csvFile");
+      if (!fileInput.files.length) {
+        alert("Please select a CSV file");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+
+      fetch(`${API_BASE}/api/backtest-upload`, { method: "POST", body: formData })
+        .then(res => res.json())
+        .then(data => {
+          console.log("upload response:", data); // debug
+
+          if (data.error) {
+            alert("Server error: " + data.error);
+            return;
+          }
+
+          // ✅ show total PnL for uploaded file
+          document.getElementById("upload_pnl").innerText = data.total_pnl;
+
+          // ✅ draw equity curve for uploaded file
+          const ctx = document.getElementById("uploadEquityChart").getContext("2d");
+          if (uploadChart) uploadChart.destroy();
+
+          uploadChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+              labels: data.equity.map((_, i) => i + 1),
+              datasets: [{
+                label: 'Equity (Uploaded)',
+                data: data.equity,
+                borderColor: '#4ADE80',
+                backgroundColor: 'rgba(74, 222, 128, 0.1)',
+                fill: true,
+                tension: 0.25
+              }]
+            },
+            options: {
+              responsive: true,
+              plugins: { legend: { labels: { color: "white" } } },
+              scales: {
+                x: { ticks: { color: "white" } },
+                y: { ticks: { color: "white" } }
+              }
+            }
+          });
+        })
+        .catch(err => {
+          console.error("upload fetch failed:", err);
+          alert("Request failed. Check console for details.");
+        });
+    }
+  </script>
+
+</body>
+
+</html>
